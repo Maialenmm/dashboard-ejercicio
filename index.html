@@ -181,6 +181,9 @@
 </head>
 <body>
     <div class="container">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <img src="https://raw.githubusercontent.com/maialenmm/dashboard-ejercicio/main/logo-uarm.png" alt="UARM Logo" style="max-width: 200px; height: auto;">
+        </div>
         <h1>📊 Dashboard de Ejercicio</h1>
         <p class="subtitle">Seguimiento de actividad física de residentes</p>
         
@@ -329,14 +332,18 @@
                     }
                     
                     const monthTotal = dailyMinutes.reduce((a, b) => a + b, 0);
-                    totalMinutes += monthTotal;
                     
-                    monthlyData.push({
-                        month: month,
-                        dailyMinutes: dailyMinutes,
-                        total: monthTotal,
-                        color: MONTH_COLORS[index]
-                    });
+                    // Solo añadir el mes si tiene datos (total > 0)
+                    if (monthTotal > 0) {
+                        totalMinutes += monthTotal;
+                        
+                        monthlyData.push({
+                            month: month,
+                            dailyMinutes: dailyMinutes,
+                            total: monthTotal,
+                            color: MONTH_COLORS[index]
+                        });
+                    }
                 }
             });
             
