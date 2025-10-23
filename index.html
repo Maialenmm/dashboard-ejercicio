@@ -182,7 +182,7 @@
 <body>
     <div class="container">
         <div style="text-align: center; margin-bottom: 20px;">
-            <img src="https://raw.githubusercontent.com/maialenmm/dashboard-ejercicio/main/logo-uarm.png" alt="UARM Logo" style="max-width: 200px; height: auto;">
+            <img src="https://raw.githubusercontent.com/maialenmm/dashboard-ejercicio/main/logo-uarm.png.png" alt="UARM Logo" style="max-width: 200px; height: auto;">
         </div>
         <h1>📊 Dashboard de Ejercicio</h1>
         <p class="subtitle">Seguimiento de actividad física de residentes</p>
@@ -199,7 +199,7 @@
     </div>
 
     <script>
-        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSA73fw8tiVDM7jNwd0-OuXuN8025rTn-Ha5FTlnLMX4Z2jBTsVKRWGctGVrWRMKDWorMuugl20eHlU/pub?output=csv';
+        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSA73fw8tiVDM7jNwd0-OuXuN8025rTn-Ha5FTlnLMX4Z2jBTsVKRWGctGVrWRMKDWorMuugl20eHlU/pub?output=csv&timestamp=' + new Date().getTime();
         
         let allData = {};
         let charts = [];
@@ -218,19 +218,39 @@
 
         async function loadData() {
             try {
-                const response = await fetch(SHEET_URL);
+                const response = await fetch(SHEET_URL, {
+                    method: 'GET',
+                    cache: 'no-cache'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Error al cargar los datos: ' + response.status);
+                }
+                
                 const csvText = await response.text();
+                
+                if (!csvText || csvText.trim() === '') {
+                    throw new Error('El archivo CSV está vacío');
+                }
                 
                 Papa.parse(csvText, {
                     header: false,
                     skipEmptyLines: true,
                     complete: function(results) {
-                        processData(results.data);
+                        if (results.data && results.data.length > 0) {
+                            processData(results.data);
+                        } else {
+                            document.getElementById('loading').textContent = 'No se encontraron datos en el archivo.';
+                        }
+                    },
+                    error: function(error) {
+                        console.error('Error al parsear CSV:', error);
+                        document.getElementById('loading').textContent = 'Error al procesar los datos.';
                     }
                 });
             } catch (error) {
                 console.error('Error loading data:', error);
-                document.getElementById('loading').textContent = 'Error al cargar los datos. Por favor, verifica que el documento esté publicado correctamente.';
+                document.getElementById('loading').innerHTML = 'Error al cargar los datos.<br>Por favor, verifica que el documento esté publicado correctamente.<br><br><button onclick="location.reload()">Reintentar</button>';
             }
         }
 
