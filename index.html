@@ -6,7 +6,6 @@
     <title>Dashboard de Ejercicio - Residentes</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -199,7 +198,7 @@
     </div>
 
     <script>
-        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXz4mUHdjq5gYFBPYP4KbkVO1KafnTEOHcOXeFTq_eY66JncysPBrCpaPK6-SnDur5tZLl0szSqEdZ/pub?output=csv&timestamp=' + new Date().getTime();
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwch4xYnaGFCQ4pgYEPVQ3SHnDhXZW0zB5KA2NiKq5paL4DZ8iDQ37tR4kWq2HhaKnCdg/exec';
         
         let allData = {};
         let charts = [];
@@ -216,85 +215,53 @@
             '#fa709a', '#fee140', '#30cfd0', '#330867'
         ];
 
-        async function loadData() {
-            try {
-                const response = await fetch(SHEET_URL, {
-                    method: 'GET',
-                    cache: 'no-cache'
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Error al cargar los datos: ' + response.status);
-                }
-                
-                const csvText = await response.text();
-                
-                if (!csvText || csvText.trim() === '') {
-                    throw new Error('El archivo CSV está vacío');
-                }
-                
-                Papa.parse(csvText, {
-                    header: false,
-                    skipEmptyLines: true,
-                    complete: function(results) {
-                        if (results.data && results.data.length > 0) {
-                            processData(results.data);
-                        } else {
-                            document.getElementById('loading').textContent = 'No se encontraron datos en el archivo.';
-                        }
-                    },
-                    error: function(error) {
-                        console.error('Error al parsear CSV:', error);
-                        document.getElementById('loading').textContent = 'Error al procesar los datos.';
-                    }
-                });
-            } catch (error) {
-                console.error('Error loading data:', error);
-                document.getElementById('loading').innerHTML = 'Error al cargar los datos.<br>Por favor, verifica que el documento esté publicado correctamente.<br><br><button onclick="location.reload()">Reintentar</button>';
-            }
+        async function loadSheet(sheetName) {
+            const url = `${SCRIPT_URL}?sheet=${encodeURIComponent(sheetName)}`;
+            const response = await fetch(url);
+            const result = await response.json();
+            return result.data || [];
         }
 
-        function processData(data) {
-            // Encontrar dónde empieza cada hoja
-            let currentSheet = null;
-            let sheetData = {};
-            
-            for (let i = 0; i < data.length; i++) {
-                const row = data[i];
+        async function loadData() {
+            try {
+                document.getElementById('loading').textContent = 'Cargando hojas...';
                 
-                // Detectar cambio de hoja
-                if (row[0] === 'Apellido 1' && row[1] === 'Apellido 2') {
-                    // Buscar el nombre de la hoja en las filas anteriores
-                    for (let j = Math.max(0, i - 5); j < i; j++) {
-                        const potentialSheetName = data[j][0];
-                        if (MONTHS.includes(potentialSheetName) || potentialSheetName === 'RESUMEN ANUAL') {
-                            currentSheet = potentialSheetName;
-                            sheetData[currentSheet] = {
-                                headers: row,
-                                rows: []
-                            };
-                            break;
-                        }
+                // Cargar Resumen Anual
+                const resumenData = await loadSheet('RESUMEN ANUAL');
+                allData['RESUMEN ANUAL'] = {
+                    headers: resumenData[0] || [],
+                    rows: resumenData.slice(1)
+                };
+                
+                // Cargar cada mes
+                for (const month of MONTHS) {
+                    try {
+                        const monthData = await loadSheet(month);
+                        allData[month] = {
+                            headers: monthData[0] || [],
+                            rows: monthData.slice(1)
+                        };
+                    } catch (e) {
+                        console.log(`No se pudo cargar ${month}`);
                     }
-                    continue;
                 }
                 
-                // Agregar datos a la hoja actual
-                if (currentSheet && row.length > 3) {
-                    sheetData[currentSheet].rows.push(row);
-                }
+                populatePersonSelector();
+                document.getElementById('loading').style.display = 'none';
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('loading').innerHTML = 'Error al cargar los datos.<br>Verifica que el script esté implementado correctamente.<br><br><button onclick="location.reload()">Reintentar</button>';
             }
-            
-            allData = sheetData;
-            populatePersonSelector();
-            document.getElementById('loading').style.display = 'none';
         }
 
         function populatePersonSelector() {
             const selector = document.getElementById('personSelector');
             const resumenAnual = allData['RESUMEN ANUAL'];
             
-            if (!resumenAnual) return;
+            if (!resumenAnual || !resumenAnual.rows) {
+                document.getElementById('loading').textContent = 'No se encontró la hoja RESUMEN ANUAL';
+                return;
+            }
             
             const people = new Set();
             resumenAnual.rows.forEach(row => {
@@ -312,6 +279,11 @@
                 selector.appendChild(option);
             });
             
+            if (sortedPeople.length === 0) {
+                document.getElementById('loading').textContent = 'No se encontraron personas en el Resumen Anual';
+                document.getElementById('loading').style.display = 'block';
+            }
+            
             selector.addEventListener('change', function() {
                 if (this.value) {
                     displayPersonData(this.value);
@@ -324,7 +296,6 @@
         }
 
         function displayPersonData(personId) {
-            // Limpiar gráficas anteriores
             charts.forEach(chart => chart.destroy());
             charts = [];
             
@@ -332,19 +303,16 @@
             content.innerHTML = '';
             content.style.display = 'block';
             
-            // Recopilar datos de todos los meses
             const monthlyData = [];
             let totalMinutes = 0;
             
             MONTHS.forEach((month, index) => {
                 const sheetData = allData[month];
-                if (!sheetData) return;
+                if (!sheetData || !sheetData.rows) return;
                 
-                // Buscar la persona en este mes
                 const personRow = sheetData.rows.find(row => row[3] === personId);
                 
                 if (personRow) {
-                    // Extraer datos diarios (empiezan en columna E, índice 4)
                     const dailyMinutes = [];
                     for (let i = 4; i < personRow.length - 1; i++) {
                         const value = parseInt(personRow[i]) || 0;
@@ -353,10 +321,8 @@
                     
                     const monthTotal = dailyMinutes.reduce((a, b) => a + b, 0);
                     
-                    // Solo añadir el mes si tiene datos (total > 0)
                     if (monthTotal > 0) {
                         totalMinutes += monthTotal;
-                        
                         monthlyData.push({
                             month: month,
                             dailyMinutes: dailyMinutes,
@@ -367,7 +333,6 @@
                 }
             });
             
-            // Mostrar resumen estadístico
             const statsHtml = `
                 <div class="stats-summary">
                     <div class="stat-card">
@@ -386,7 +351,6 @@
             `;
             content.innerHTML = statsHtml;
             
-            // Crear gráficas mensuales
             const chartsContainer = document.createElement('div');
             chartsContainer.className = 'charts-container';
             
@@ -405,7 +369,6 @@
                 wrapper.appendChild(canvas);
                 chartsContainer.appendChild(wrapper);
                 
-                // Crear gráfica
                 const days = Array.from({length: data.dailyMinutes.length}, (_, i) => `Día ${i + 1}`);
                 
                 const chart = new Chart(canvas, {
@@ -428,9 +391,7 @@
                         responsive: true,
                         maintainAspectRatio: true,
                         plugins: {
-                            legend: {
-                                display: false
-                            },
+                            legend: { display: false },
                             tooltip: {
                                 callbacks: {
                                     label: function(context) {
@@ -457,7 +418,6 @@
             
             content.appendChild(chartsContainer);
             
-            // Crear gráfica anual
             if (monthlyData.length > 0) {
                 const annualWrapper = document.createElement('div');
                 annualWrapper.className = 'chart-wrapper annual-chart';
@@ -488,9 +448,7 @@
                         responsive: true,
                         maintainAspectRatio: true,
                         plugins: {
-                            legend: {
-                                display: false
-                            },
+                            legend: { display: false },
                             tooltip: {
                                 callbacks: {
                                     label: function(context) {
@@ -521,7 +479,6 @@
             }
         }
 
-        // Exportar a PDF
         document.getElementById('exportBtn').addEventListener('click', function() {
             const personName = document.getElementById('personSelector').value;
             const element = document.getElementById('content');
@@ -537,7 +494,6 @@
             html2pdf().set(opt).from(element).save();
         });
 
-        // Cargar datos al inicio
         loadData();
     </script>
 </body>
