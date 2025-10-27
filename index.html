@@ -208,7 +208,7 @@
     </div>
 
     <script>
-        const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSA73fw8tiVDM7jNwd0-OuXuN8025rTn-Ha5FTlnLMX4Z2jBTsVKRWGctGVrWRMKDWorMuugl20eHlU/pub?output=csv';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxJIGzejVeuS9TgbWUV5gzwYtqh7V3_2KyIz3n9vs3oCzbU6Fbw2-umwhvZ1bg2qkUgPQ/exec';
         
         let allData = {};
         let currentCharts = [];
@@ -221,21 +221,12 @@
         // Cargar datos
         async function loadData() {
             try {
-                const response = await fetch(CSV_URL);
-                const csvText = await response.text();
+                const response = await fetch(SCRIPT_URL);
+                const jsonData = await response.json();
                 
-                Papa.parse(csvText, {
-                    header: true,
-                    skipEmptyLines: true,
-                    complete: function(results) {
-                        processData(results.data);
-                    },
-                    error: function(error) {
-                        console.error('Error parsing CSV:', error);
-                        document.getElementById('loading').innerHTML = 
-                            '<p style="color: red;">Error al cargar los datos. Por favor, recarga la página.</p>';
-                    }
-                });
+                console.log('Datos recibidos del script:', jsonData);
+                processData(jsonData);
+                
             } catch (error) {
                 console.error('Error loading data:', error);
                 document.getElementById('loading').innerHTML = 
@@ -243,36 +234,84 @@
             }
         }
         
-        // Procesar datos del CSV
-        function processData(data) {
-            console.log('Datos recibidos:', data);
+        // Procesar datos del JSON
+        function processData(jsonData) {
+            console.log('Procesando datos...');
             
-            data.forEach(row => {
-                // El CSV tiene columnas: Apellido 1, Apellido 2, Nombre, DNI, luego los meses
-                const fullName = `${row['Apellido 1'] || ''} ${row['Apellido 2'] || ''} ${row['Nombre'] || ''}`.trim();
+            // Procesar cada pestaña del Google Sheet
+            Object.keys(jsonData).forEach(sheetName => {
+                console.log('Procesando pestaña:', sheetName);
+                const sheetData = jsonData[sheetName];
                 
-                if (!fullName || fullName === '0 0 0') return; // Saltar filas vacías
-                
-                if (!allData[fullName]) {
-                    allData[fullName] = {};
-                }
-                
-                // Procesar cada mes
-                monthNames.forEach((month, index) => {
-                    const monthKey = month.toUpperCase() + ' 26';
-                    if (row[monthKey]) {
-                        const value = parseFloat(row[monthKey]) || 0;
-                        allData[fullName][month] = value;
+                sheetData.forEach(row => {
+                    // Identificar el nombre completo de la persona
+                    const fullName = `${row['Apellido 1'] || ''} ${row['Apellido 2'] || ''} ${row['Nombre'] || ''}`.trim();
+                    
+                    if (!fullName || fullName === '0 0 0' || fullName === '') return;
+                    
+                    if (!allData[fullName]) {
+                        allData[fullName] = {
+                            months: {},
+                            dailyData: {}
+                        };
+                    }
+                    
+                    // Si es la pestaña RESUMEN ANUAL
+                    if (sheetName === 'RESUMEN ANUAL') {
+                        // Extraer totales mensuales
+                        monthNames.forEach(month => {
+                            Object.keys(row).forEach(key => {
+                                if (key.toUpperCase().includes(month.toUpperCase())) {
+                                    const value = parseFloat(row[key]) || 0;
+                                    if (value > 0) {
+                                        allData[fullName].months[month] = value;
+                                    }
+                                }
+                            });
+                        });
+                        
+                        // Total anual
+                        if (row['TOTAL ANUAL']) {
+                            allData[fullName].totalAnual = parseFloat(row['TOTAL ANUAL']) || 0;
+                        }
+                    } else {
+                        // Es una pestaña de mes individual (ej: "Noviembre 25")
+                        // Extraer el nombre del mes de la pestaña
+                        let monthName = null;
+                        monthNames.forEach(m => {
+                            if (sheetName.toUpperCase().includes(m.toUpperCase())) {
+                                monthName = m;
+                            }
+                        });
+                        
+                        if (monthName) {
+                            // Guardar datos diarios del mes
+                            if (!allData[fullName].dailyData[monthName]) {
+                                allData[fullName].dailyData[monthName] = [];
+                            }
+                            
+                            // Extraer minutos por cada día
+                            Object.keys(row).forEach(key => {
+                                // Columnas como "Sab 1", "Dom 2", "Lun 3", etc.
+                                if (key.includes('Sab') || key.includes('Dom') || key.includes('Lun') || 
+                                    key.includes('Mar') || key.includes('Mie') || key.includes('Jue') || 
+                                    key.includes('Vie')) {
+                                    const value = parseFloat(row[key]) || 0;
+                                    allData[fullName].dailyData[monthName].push(value);
+                                }
+                            });
+                        }
                     }
                 });
-                
-                // Total anual
-                if (row['TOTAL ANUAL']) {
-                    allData[fullName]['Total'] = parseFloat(row['TOTAL ANUAL']) || 0;
-                }
             });
             
             console.log('Datos procesados:', allData);
+            
+            if (Object.keys(allData).length === 0) {
+                document.getElementById('loading').innerHTML = 
+                    '<p style="color: red;">No se encontraron datos. Revisa la consola para más detalles.</p>';
+                return;
+            }
             
             populateSelector();
             document.getElementById('loading').style.display = 'none';
@@ -309,13 +348,11 @@
             
             const personData = allData[person];
             
-            // Crear gráfica para cada mes
-            monthNames.forEach((month, index) => {
-                const value = personData[month] || 0;
-                
-                // Solo mostrar meses con datos
-                if (value > 0) {
-                    createMonthChart(month, value, chartsContainer);
+            // Crear gráfica para cada mes con datos
+            monthNames.forEach((month) => {
+                // Verificar si hay datos diarios para este mes
+                if (personData.dailyData && personData.dailyData[month] && personData.dailyData[month].length > 0) {
+                    createMonthChart(month, personData.dailyData[month], chartsContainer);
                 }
             });
             
@@ -323,8 +360,8 @@
             createAnnualChart(person, personData, chartsContainer);
         }
         
-        // Crear gráfica mensual
-        function createMonthChart(month, minutes, container) {
+        // Crear gráfica mensual con datos diarios reales
+        function createMonthChart(month, dailyMinutes, container) {
             const section = document.createElement('div');
             section.className = 'chart-section';
             
@@ -341,18 +378,16 @@
             
             container.appendChild(section);
             
-            // Crear datos de ejemplo por día (distribución del total)
-            const daysInMonth = 30;
-            const avgPerDay = minutes / daysInMonth;
+            // Crear etiquetas y datos acumulados
             const labels = [];
             const data = [];
             let accumulated = 0;
             
-            for (let i = 1; i <= daysInMonth; i++) {
-                labels.push(`Día ${i}`);
-                accumulated += avgPerDay;
+            dailyMinutes.forEach((minutes, index) => {
+                labels.push(`Día ${index + 1}`);
+                accumulated += minutes;
                 data.push(accumulated);
-            }
+            });
             
             const chart = new Chart(canvas, {
                 type: 'line',
@@ -382,7 +417,7 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return `${context.parsed.y.toFixed(0)} minutos`;
+                                    return `${context.parsed.y.toFixed(0)} minutos acumulados`;
                                 }
                             }
                         }
@@ -433,7 +468,7 @@
             const data = [];
             
             monthNames.forEach(month => {
-                const value = personData[month] || 0;
+                const value = personData.months[month] || 0;
                 if (value > 0) {
                     labels.push(month);
                     data.push(value);
